@@ -1,25 +1,44 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "timer.h"
+#include "write_vtk.h"
 
-#define NUM_POINTS_PER_DIR 256
-#define NUM_TIMESTEPS 20
+#define NUM_POINTS_PER_DIR 64
+#define NUM_TIMESTEPS 100
 
-#define DX 1.0 / NUM_POINTS_PER_DIR
-#define DT 1.0 / NUM_TIMESTEPS
+#define DX (1.0 / NUM_POINTS_PER_DIR)
+#define DT (1.0 / NUM_TIMESTEPS)
 
-#define NU 1.0
+#define NU 0.1
 
 #define NUM_POINTS \
     NUM_POINTS_PER_DIR * NUM_POINTS_PER_DIR * NUM_POINTS_PER_DIR
 
 #define ALLOC_SIZE NUM_POINTS * sizeof(double)
 
+#ifndef OUTPUT_VTK_FREQ
+#define OUTPUT_VTK_FREQ 0
+#endif
+
 #define ROW_MAJ(x, y, z) \
    ((z) * NUM_POINTS_PER_DIR * NUM_POINTS_PER_DIR + \
     (y) * NUM_POINTS_PER_DIR + x)
+
+static double forcing(double x, double y, double z, double t)
+{
+    double rx = (x - 0.5) * (x - 0.5);
+    double ry = (y - 0.5) * (y - 0.5);
+    double rz = (z - 0.5) * (z - 0.5);
+
+    if (rx + ry + rz < 0.01) {
+        return 0.1;
+    } else {
+        return 0;
+    }
+}
 
 // Solves (I - Dxx) delta = rhs
 void solve_Dxx_tridiag(double *rhs, double *delta)
@@ -177,11 +196,35 @@ void solve_Dzz_tridiag(double *rhs, double *delta)
     TIMER_SCOPE_BW_END(solve_Dzz_tridiag, 4 * ALLOC_SIZE);
 }
 
-void compute_eps(const double *eta, const double *zeta,
-                 const double *u, double *eps)
+void compute_eps_naive(const double *eta, const double *zeta,
+                       const double *u, double *eps, int t)
 {
-    for (int i = 0; i < NUM_POINTS; ++i) {
-        eps[i] = 1;
+    for (int z = 0; z < NUM_POINTS_PER_DIR; ++z) {
+        for (int y = 0; y < NUM_POINTS_PER_DIR; ++y) {
+            for (int x = 0; x < NUM_POINTS_PER_DIR; ++x) {
+
+                // we don't care about the rhs value at boundaries
+                if (x == 0 || x == NUM_POINTS_PER_DIR - 1 ||
+                    y == 0 || y == NUM_POINTS_PER_DIR - 1 ||
+                    z == 0 || z == NUM_POINTS_PER_DIR - 1) {
+                    eps[ROW_MAJ(x, y, z)] = 0.0;
+                    continue;
+                }
+
+                const double dxx = eta[ROW_MAJ(x - 1, y, z)] -
+                    2.0 * eta[ROW_MAJ(x, y, z)] + eta[ROW_MAJ(x + 1, y, z)];
+
+                const double dyy = zeta[ROW_MAJ(x, y - 1, z)] -
+                    2.0 * zeta[ROW_MAJ(x, y, z)] + zeta[ROW_MAJ(x, y + 1, z)];
+
+                const double dzz = u[ROW_MAJ(x, y, z - 1)] -
+                    2.0 * u[ROW_MAJ(x, y, z)] + u[ROW_MAJ(x, y, z + 1)];
+
+                eps[ROW_MAJ(x, y, z)] = eta[ROW_MAJ(x, y, z)] + DT * (
+                    forcing(x * DX, y * DX, z * DX, (t + 0.5) * DT) +
+                    NU * (dxx + dyy + dzz) / (DX * DX));
+            }
+        }
     }
 }
 
@@ -194,9 +237,9 @@ void solve_timestep(double *eta, double *zeta, double *u, int t)
     // -O3 optimizes away memset(delta, 0, ALLOC_SIZE)
     memset(delta, 1, ALLOC_SIZE);
 
-    TIMER_SCOPE_START(compute_eps_dummy);
-    compute_eps(eta, zeta, u, eps);
-    TIMER_SCOPE_END(compute_eps_dummy);
+    TIMER_SCOPE_START(compute_eps_naive);
+    compute_eps_naive(eta, zeta, u, eps, t);
+    TIMER_SCOPE_END(compute_eps_naive);
 
     // Compute eps_n+1 - eta_n
     TIMER_SCOPE_START(compute_Dxx_rhs);
@@ -243,7 +286,7 @@ void solve_timestep(double *eta, double *zeta, double *u, int t)
     }
     TIMER_SCOPE_BW_END(update_u, 3 * ALLOC_SIZE);
 
-    TIMER_LOG_NL_IF((t + 1) % TIMER_LOG_FREQ == 0 && t < NUM_TIMESTEPS - 1);
+    TIMER_LOG_NL_IF((t + 1) % TIMER_LOG_FREQ == 0);
 
     free(eps);
     free(rhs);
@@ -260,10 +303,22 @@ int main(int argc, char *argv[])
     memset(zeta, 0, ALLOC_SIZE);
     memset(u, 0, ALLOC_SIZE);
 
-    for (int t = 0; t < NUM_TIMESTEPS; ++t) {
+    if (OUTPUT_VTK_FREQ > 0) {
+        write_vtk("u-0000.vti", "u", u, NUM_POINTS_PER_DIR,
+                  NUM_POINTS_PER_DIR, NUM_POINTS_PER_DIR, DX);
+    }
+
+    for (int t = 1; t < NUM_TIMESTEPS + 1; ++t) {
         TIMER_SCOPE_START(solve_timestep);
         solve_timestep(eta, zeta, u, t);
         TIMER_SCOPE_END(solve_timestep);
+
+        if (t % OUTPUT_VTK_FREQ == 0) {
+            char filename[32];
+            sprintf(filename, "u-%04d.vti", t);
+            write_vtk(filename, "u", u, NUM_POINTS_PER_DIR,
+                      NUM_POINTS_PER_DIR, NUM_POINTS_PER_DIR, DX);
+        }
     }
 
     free(eta);
