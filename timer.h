@@ -6,6 +6,10 @@
 
 #ifdef TIMER
 
+#ifndef TIMER_LOG_FREQ
+#define TIMER_LOG_FREQ 1
+#endif
+
 #define TIMER_CREATE(name) \
     struct timespec _timer_##name##_start, \
                     _timer_##name##_end; \
@@ -27,29 +31,32 @@ do { \
     ++_timer_##name##_count; \
 } while (0)
 
-#define TIMER_LOG_IF(name, cond) \
-if (cond) { \
-    printf("%-16s %12.4f ms %12s   [avg %ld runs]\n", #name, \
-           _timer_##name##_elapsed_ms / _timer_##name##_count, "", \
-           _timer_##name##_count); \
-}
-
 #define TIMER_LOG_BW_IF(name, bytes, cond) \
 if (cond) { \
-    double bandwidth = (bytes) / \
-        (_timer_##name##_elapsed_ms / _timer_##name##_count) / 1e6; \
-    printf("%-16s %12.4f ms %7.2f GB/s   [avg %ld runs]\n", #name, \
-           _timer_##name##_elapsed_ms / _timer_##name##_count, \
-           bandwidth, _timer_##name##_count); \
+    if (bytes > 0) { \
+        double bandwidth = (bytes) / \
+            (_timer_##name##_elapsed_ms / _timer_##name##_count) / 1e6; \
+        printf("%-20s %12.4f ms %7.2f GB/s   [avg %ld runs]\n", #name, \
+               _timer_##name##_elapsed_ms / _timer_##name##_count, \
+               bandwidth, _timer_##name##_count); \
+    } else { \
+        printf("%-20s %12.4f ms %12s   [avg %ld runs]\n", #name, \
+           _timer_##name##_elapsed_ms / _timer_##name##_count, "", \
+           _timer_##name##_count); \
+    } \
 }
+
+#define TIMER_LOG_IF(name, cond) TIMER_LOG_BW_IF(name, 0, cond)
 
 #define TIMER_LOG_NL_IF(cond) \
 if (cond) { \
     printf("\n"); \
 }
 
-#define TIMER_LOG(name) TIMER_LOG_IF(name, 1)
-#define TIMER_LOG_BW(name, bytes) TIMER_LOG_BW_IF(name, bytes, 1)
+#define TIMER_LOG(name) \
+    TIMER_LOG_IF(name, _timer_##name##_count % TIMER_LOG_FREQ == 0)
+#define TIMER_LOG_BW(name, bytes) \
+    TIMER_LOG_BW_IF(name, bytes, _timer_##name##_count & TIMER_LOG_FREQ == 0)
 #define TIMER_LOG_NL() TIMER_LOG_NL_IF(1)
 
 #else
@@ -63,7 +70,17 @@ if (cond) { \
 #define TIMER_LOG(...)
 #define TIMER_LOG_BW(...)
 #define TIMER_LOG_NL(...)
+#define TIMER_LOG_NL(...)
 
 #endif
+
+#define TIMER_SCOPE_START(name) \
+    TIMER_CREATE(name); TIMER_RESTART(name);
+
+#define TIMER_SCOPE_END(name) \
+    TIMER_STOP(name); TIMER_LOG(name);
+
+#define TIMER_SCOPE_END_BW(name, bytes) \
+    TIMER_STOP(name); TIMER_LOG_BW(name, bytes);
 
 #endif

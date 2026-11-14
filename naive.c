@@ -17,97 +17,236 @@
 
 #define ALLOC_SIZE NUM_POINTS * sizeof(double)
 
+#define ROW_MAJ(x, y, z) \
+   ((z) * NUM_POINTS_PER_DIR * NUM_POINTS_PER_DIR + \
+    (y) * NUM_POINTS_PER_DIR + x)
+
 // Solves (I - Dxx) delta = rhs
-void solve_Dxx_tridiag(const double *rhs, double *delta, int n)
+void solve_Dxx_tridiag(double *rhs, double *delta)
 {
-    return;
+    TIMER_CREATE(solve_Dxx_tridiag);
+    TIMER_RESTART(solve_Dxx_tridiag);
+
+    double *upp = malloc((NUM_POINTS_PER_DIR - 1) * sizeof(double));
+
+    for (int z = 0; z < NUM_POINTS_PER_DIR; ++z) {
+        for (int y = 0; y < NUM_POINTS_PER_DIR; ++y) {
+
+            upp[0] = 0;
+            // homogeneous dirichlet
+            rhs[ROW_MAJ(0, y, z)] = 0;
+
+            // Forward reduction
+            for (int x = 1; x < NUM_POINTS_PER_DIR - 1; ++x) {
+
+                const double w = DT * NU / (2 * DX * DX);
+                const double upp_i = -w;
+                const double mid_i = 1.0 + 2 * w;
+                const double low_i = -w;
+
+                const double norm_coef = mid_i - low_i * upp[x - 1];
+
+                // upp_i = upp_i / (mid_i - low_i upp_i-1)
+                upp[x] = upp_i / norm_coef;
+
+                // rhs_i = (rhs_i - low_i rhs_i-1) / (mid_i - low_i upp_i-1)
+                rhs[ROW_MAJ(x, y, z)] =
+                    (rhs[ROW_MAJ(x, y, z)] -
+                     low_i * rhs[ROW_MAJ(x - 1, y, z)]) / norm_coef;
+            }
+
+            // homogeneous dirichlet
+            delta[ROW_MAJ(NUM_POINTS_PER_DIR - 1, y, z)] = 0;
+
+            // Backward substitution
+            for (int x = 1; x < NUM_POINTS_PER_DIR; ++x) {
+                // delta_i = rhs_i - upp_i delta_i+1
+                delta[ROW_MAJ(NUM_POINTS_PER_DIR - x - 1, y, z)] =
+                    rhs[ROW_MAJ(NUM_POINTS_PER_DIR - x - 1, y, z)] -
+                    upp[NUM_POINTS_PER_DIR - x - 1] *
+                    delta[ROW_MAJ(NUM_POINTS_PER_DIR - x, y, z)];
+            }
+        }
+    }
+
+    free(upp);
+
+    TIMER_STOP(solve_Dxx_tridiag);
+    TIMER_LOG(solve_Dxx_tridiag);
 }
 
 // Solves (I - Dyy) delta = rhs
-void solve_Dyy_tridiag(const double *rhs, double *delta, int n)
+void solve_Dyy_tridiag(double *rhs, double *delta)
 {
-    return;
+    TIMER_CREATE(solve_Dyy_tridiag);
+    TIMER_RESTART(solve_Dyy_tridiag);
+
+    double *upp = malloc(NUM_POINTS_PER_DIR * sizeof(double));
+
+    for (int z = 0; z < NUM_POINTS_PER_DIR; ++z) {
+        for (int x = 0; x < NUM_POINTS_PER_DIR; ++x) {
+
+            upp[0] = 0;
+            // homogeneous dirichlet
+            rhs[ROW_MAJ(x, 0, z)] = 0;
+
+            // Forward reduction
+            for (int y = 1; y < NUM_POINTS_PER_DIR - 1; ++y) {
+
+                const double w = DT * NU / (2 * DX * DX);
+                const double upp_i = -w;
+                const double mid_i = 1.0 + 2 * w;
+                const double low_i = -w;
+
+                const double norm_coef = mid_i - low_i * upp[y - 1];
+
+                // upp_i = upp_i / (mid_i - low_i upp_i-1)
+                upp[y] = upp_i / norm_coef;
+
+                // rhs_i = (rhs_i - low_i rhs_i-1) / (mid_i - low_i upp_i-1)
+                rhs[ROW_MAJ(x, y, z)] =
+                    (rhs[ROW_MAJ(x, y, z)] -
+                     low_i * rhs[ROW_MAJ(x, y - 1, z)]) / norm_coef;
+            }
+
+            // homogeneous dirichlet
+            delta[ROW_MAJ(x, NUM_POINTS_PER_DIR - 1, z)] = 0;
+
+            // Backward substitution
+            for (int y = 1; y < NUM_POINTS_PER_DIR; ++y) {
+                // delta_i = rhs_i - upp_i delta_i+1
+                delta[ROW_MAJ(x, NUM_POINTS_PER_DIR - y - 1, z)] =
+                    rhs[ROW_MAJ(x, NUM_POINTS_PER_DIR - y - 1, z)] -
+                    upp[NUM_POINTS_PER_DIR - y - 1] *
+                    delta[ROW_MAJ(x, NUM_POINTS_PER_DIR - y, z)];
+            }
+        }
+    }
+
+    free(upp);
+
+    TIMER_STOP(solve_Dyy_tridiag);
+    TIMER_LOG(solve_Dyy_tridiag);
 }
 
 // Solves (I - Dzz) delta = rhs
-void solve_Dzz_tridiag(const double *rhs, double *delta, int n)
+void solve_Dzz_tridiag(double *rhs, double *delta)
 {
-    return;
+    TIMER_CREATE(solve_Dzz_tridiag);
+    TIMER_RESTART(solve_Dzz_tridiag);
+
+    double *upp = malloc(NUM_POINTS_PER_DIR * sizeof(double));
+
+    for (int y = 0; y < NUM_POINTS_PER_DIR; ++y) {
+        for (int x = 0; x < NUM_POINTS_PER_DIR; ++x) {
+
+            upp[0] = 0;
+            // homogeneous dirichlet
+            rhs[ROW_MAJ(x, y, 0)] = 0;
+
+            // Forward reduction
+            for (int z = 1; z < NUM_POINTS_PER_DIR - 1; ++z) {
+
+                const double w = DT * NU / (2 * DX * DX);
+                const double upp_i = -w;
+                const double mid_i = 1.0 + 2 * w;
+                const double low_i = -w;
+
+                const double norm_coef = mid_i - low_i * upp[z - 1];
+
+                // upp_i = upp_i / (mid_i - low_i upp_i-1)
+                upp[z] = upp_i / norm_coef;
+
+                // rhs_i = (rhs_i - low_i rhs_i-1) / (mid_i - low_i upp_i-1)
+                rhs[ROW_MAJ(x, y, z)] =
+                    (rhs[ROW_MAJ(x, y, z)] -
+                     low_i * rhs[ROW_MAJ(x, y, z - 1)]) / norm_coef;
+            }
+
+            // homogeneous dirichlet
+            delta[ROW_MAJ(x, y, NUM_POINTS_PER_DIR - 1)] = 0;
+
+            // Backward substitution
+            for (int z = 1; z < NUM_POINTS_PER_DIR; ++z) {
+                // delta_i = rhs_i - upp_i delta_i+1
+                delta[ROW_MAJ(x, y, NUM_POINTS_PER_DIR - z - 1)] =
+                    rhs[ROW_MAJ(x, y, NUM_POINTS_PER_DIR - z - 1)] -
+                    upp[NUM_POINTS_PER_DIR - z - 1] *
+                    delta[ROW_MAJ(x, y, NUM_POINTS_PER_DIR - z)];
+            }
+        }
+    }
+
+    free(upp);
+
+    TIMER_STOP(solve_Dzz_tridiag);
+    TIMER_LOG(solve_Dzz_tridiag);
 }
 
 void compute_eps(const double *eta, const double *zeta,
-                 const double *u, double *eps, int n)
+                 const double *u, double *eps)
 {
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < NUM_POINTS; ++i) {
         eps[i] = 1;
     }
 }
 
-void solve_timestep(double *eta, double *zeta, double *u, int n, int t)
+void solve_timestep(double *eta, double *zeta, double *u, int t)
 {
-    TIMER_CREATE(compute_eps);
-    TIMER_CREATE(solve_Dxx);
-    TIMER_CREATE(solve_Dyy);
-    TIMER_CREATE(solve_Dzz);
-
     double *eps = malloc(ALLOC_SIZE);
     double *rhs = malloc(ALLOC_SIZE);
     double *delta = malloc(ALLOC_SIZE);
 
-    TIMER_RESTART(compute_eps);
-    compute_eps(eta, zeta, u, eps, n);
-    TIMER_STOP(compute_eps);
-
-    TIMER_RESTART(solve_Dxx);
+    TIMER_SCOPE_START(compute_eps_dummy);
+    compute_eps(eta, zeta, u, eps);
+    TIMER_SCOPE_END(compute_eps_dummy);
 
     // Compute eps_n+1 - eta_n
-    for (int i = 0; i < n; ++i) {
+    TIMER_SCOPE_START(compute_Dxx_rhs);
+    for (int i = 0; i < NUM_POINTS; ++i) {
         rhs[i] = eps[i] - eta[i];
     }
+    TIMER_SCOPE_END(compute_Dxx_rhs);
     // Solve for delta_eta
-    solve_Dxx_tridiag(delta, rhs, n);
+    solve_Dxx_tridiag(rhs, delta);
     // Compute eta^n+1 = eta^n + delta_eta
-    for (int i = 0; i < n; ++i) {
+    TIMER_SCOPE_START(update_eta);
+    for (int i = 0; i < NUM_POINTS; ++i) {
         eta[i] += delta[i];
     }
-
-    TIMER_STOP(solve_Dxx);
-
-    TIMER_RESTART(solve_Dyy);
+    TIMER_SCOPE_END(update_eta);
 
     // Compute eta_n+1 - zeta_n
-    for (int i = 0; i < n; ++i) {
+    TIMER_SCOPE_START(compute_Dyy_rhs);
+    for (int i = 0; i < NUM_POINTS; ++i) {
         rhs[i] = eta[i] - zeta[i];
     }
+    TIMER_SCOPE_END(compute_Dyy_rhs);
     // Solve for delta_zeta
-    solve_Dyy_tridiag(delta, rhs, n);
+    solve_Dyy_tridiag(rhs, delta);
     // Compute eta^n+1 = eta^n + delta_eta
-    for (int i = 0; i < n; ++i) {
+    TIMER_SCOPE_START(update_zeta);
+    for (int i = 0; i < NUM_POINTS; ++i) {
         zeta[i] += delta[i];
     }
+    TIMER_SCOPE_END(update_zeta);
 
-    TIMER_STOP(solve_Dyy);
-
-    TIMER_RESTART(solve_Dzz);
-
+    TIMER_SCOPE_START(compute_Dzz_rhs);
     // Compute zeta_n+1 - u_n
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < NUM_POINTS; ++i) {
         rhs[i] = zeta[i] - u[i];
     }
+    TIMER_SCOPE_END(compute_Dzz_rhs);
     // Solve for delta_zeta
-    solve_Dzz_tridiag(delta, rhs, n);
+    solve_Dzz_tridiag(rhs, delta);
     // Compute eta^n+1 = eta^n + delta_eta
-    for (int i = 0; i < n; ++i) {
+    TIMER_SCOPE_START(update_u);
+    for (int i = 0; i < NUM_POINTS; ++i) {
         u[i] += delta[i];
     }
+    TIMER_SCOPE_END(update_u);
 
-    TIMER_STOP(solve_Dzz);
-
-    TIMER_LOG_BW(compute_eps, 2 * ALLOC_SIZE);
-    TIMER_LOG(solve_Dxx);
-    TIMER_LOG(solve_Dyy);
-    TIMER_LOG(solve_Dzz);
-    TIMER_LOG_NL();
+    TIMER_LOG_NL_IF((t + 1) % TIMER_LOG_FREQ == 0 && t < NUM_TIMESTEPS - 1);
 
     free(eps);
     free(rhs);
@@ -125,7 +264,9 @@ int main(int argc, char *argv[])
     memset(u, 0, ALLOC_SIZE);
 
     for (int t = 0; t < NUM_TIMESTEPS; ++t) {
-        solve_timestep(eta, zeta, u, NUM_POINTS, t);
+        TIMER_SCOPE_START(solve_timestep);
+        solve_timestep(eta, zeta, u, t);
+        TIMER_SCOPE_END(solve_timestep);
     }
 
     free(eta);
