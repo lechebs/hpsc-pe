@@ -36,11 +36,11 @@ if (cond) { \
     if (bytes > 0) { \
         double bandwidth = (bytes) / \
             (_timer_##name##_elapsed_ms / _timer_##name##_count) / 1e6; \
-        printf("%-20s %12.4f ms %7.2f GB/s   [avg %ld runs]\n", #name, \
-               _timer_##name##_elapsed_ms / _timer_##name##_count, \
-               bandwidth, _timer_##name##_count); \
+        printf("%-20s %12.4f ms %8.2f MB %7.2f GB/s   [avg %ld runs]\n", \
+               #name, _timer_##name##_elapsed_ms / _timer_##name##_count, \
+               bytes / 1e6, bandwidth, _timer_##name##_count); \
     } else { \
-        printf("%-20s %12.4f ms %12s   [avg %ld runs]\n", #name, \
+        printf("%-20s %12.4f ms %24s   [avg %ld runs]\n", #name, \
            _timer_##name##_elapsed_ms / _timer_##name##_count, "", \
            _timer_##name##_count); \
     } \
@@ -56,7 +56,7 @@ if (cond) { \
 #define TIMER_LOG(name) \
     TIMER_LOG_IF(name, _timer_##name##_count % TIMER_LOG_FREQ == 0)
 #define TIMER_LOG_BW(name, bytes) \
-    TIMER_LOG_BW_IF(name, bytes, _timer_##name##_count & TIMER_LOG_FREQ == 0)
+    TIMER_LOG_BW_IF(name, bytes, _timer_##name##_count % TIMER_LOG_FREQ == 0)
 #define TIMER_LOG_NL() TIMER_LOG_NL_IF(1)
 
 #else
@@ -80,7 +80,7 @@ if (cond) { \
 #define TIMER_SCOPE_END(name) \
     TIMER_STOP(name); TIMER_LOG(name);
 
-#define TIMER_SCOPE_END_BW(name, bytes) \
+#define TIMER_SCOPE_BW_END(name, bytes) \
     TIMER_STOP(name); TIMER_LOG_BW(name, bytes);
 
 #endif

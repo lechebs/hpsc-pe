@@ -4,8 +4,8 @@
 
 #include "timer.h"
 
-#define NUM_POINTS_PER_DIR 128
-#define NUM_TIMESTEPS 100
+#define NUM_POINTS_PER_DIR 256
+#define NUM_TIMESTEPS 20
 
 #define DX 1.0 / NUM_POINTS_PER_DIR
 #define DT 1.0 / NUM_TIMESTEPS
@@ -24,8 +24,7 @@
 // Solves (I - Dxx) delta = rhs
 void solve_Dxx_tridiag(double *rhs, double *delta)
 {
-    TIMER_CREATE(solve_Dxx_tridiag);
-    TIMER_RESTART(solve_Dxx_tridiag);
+    TIMER_SCOPE_START(solve_Dxx_tridiag);
 
     double *upp = malloc((NUM_POINTS_PER_DIR - 1) * sizeof(double));
 
@@ -71,15 +70,13 @@ void solve_Dxx_tridiag(double *rhs, double *delta)
 
     free(upp);
 
-    TIMER_STOP(solve_Dxx_tridiag);
-    TIMER_LOG(solve_Dxx_tridiag);
+    TIMER_SCOPE_BW_END(solve_Dxx_tridiag, 4 * ALLOC_SIZE);
 }
 
 // Solves (I - Dyy) delta = rhs
 void solve_Dyy_tridiag(double *rhs, double *delta)
 {
-    TIMER_CREATE(solve_Dyy_tridiag);
-    TIMER_RESTART(solve_Dyy_tridiag);
+    TIMER_SCOPE_START(solve_Dyy_tridiag);
 
     double *upp = malloc(NUM_POINTS_PER_DIR * sizeof(double));
 
@@ -125,15 +122,13 @@ void solve_Dyy_tridiag(double *rhs, double *delta)
 
     free(upp);
 
-    TIMER_STOP(solve_Dyy_tridiag);
-    TIMER_LOG(solve_Dyy_tridiag);
+    TIMER_SCOPE_BW_END(solve_Dyy_tridiag, 4 * ALLOC_SIZE);
 }
 
 // Solves (I - Dzz) delta = rhs
 void solve_Dzz_tridiag(double *rhs, double *delta)
 {
-    TIMER_CREATE(solve_Dzz_tridiag);
-    TIMER_RESTART(solve_Dzz_tridiag);
+    TIMER_SCOPE_START(solve_Dzz_tridiag);
 
     double *upp = malloc(NUM_POINTS_PER_DIR * sizeof(double));
 
@@ -179,8 +174,7 @@ void solve_Dzz_tridiag(double *rhs, double *delta)
 
     free(upp);
 
-    TIMER_STOP(solve_Dzz_tridiag);
-    TIMER_LOG(solve_Dzz_tridiag);
+    TIMER_SCOPE_BW_END(solve_Dzz_tridiag, 4 * ALLOC_SIZE);
 }
 
 void compute_eps(const double *eta, const double *zeta,
@@ -197,6 +191,9 @@ void solve_timestep(double *eta, double *zeta, double *u, int t)
     double *rhs = malloc(ALLOC_SIZE);
     double *delta = malloc(ALLOC_SIZE);
 
+    // -O3 optimizes away memset(delta, 0, ALLOC_SIZE)
+    memset(delta, 1, ALLOC_SIZE);
+
     TIMER_SCOPE_START(compute_eps_dummy);
     compute_eps(eta, zeta, u, eps);
     TIMER_SCOPE_END(compute_eps_dummy);
@@ -206,7 +203,7 @@ void solve_timestep(double *eta, double *zeta, double *u, int t)
     for (int i = 0; i < NUM_POINTS; ++i) {
         rhs[i] = eps[i] - eta[i];
     }
-    TIMER_SCOPE_END(compute_Dxx_rhs);
+    TIMER_SCOPE_BW_END(compute_Dxx_rhs, 4 * ALLOC_SIZE);
     // Solve for delta_eta
     solve_Dxx_tridiag(rhs, delta);
     // Compute eta^n+1 = eta^n + delta_eta
@@ -214,14 +211,14 @@ void solve_timestep(double *eta, double *zeta, double *u, int t)
     for (int i = 0; i < NUM_POINTS; ++i) {
         eta[i] += delta[i];
     }
-    TIMER_SCOPE_END(update_eta);
+    TIMER_SCOPE_BW_END(update_eta, 3 * ALLOC_SIZE);
 
     // Compute eta_n+1 - zeta_n
     TIMER_SCOPE_START(compute_Dyy_rhs);
     for (int i = 0; i < NUM_POINTS; ++i) {
         rhs[i] = eta[i] - zeta[i];
     }
-    TIMER_SCOPE_END(compute_Dyy_rhs);
+    TIMER_SCOPE_BW_END(compute_Dyy_rhs, 4 * ALLOC_SIZE);
     // Solve for delta_zeta
     solve_Dyy_tridiag(rhs, delta);
     // Compute eta^n+1 = eta^n + delta_eta
@@ -229,14 +226,14 @@ void solve_timestep(double *eta, double *zeta, double *u, int t)
     for (int i = 0; i < NUM_POINTS; ++i) {
         zeta[i] += delta[i];
     }
-    TIMER_SCOPE_END(update_zeta);
+    TIMER_SCOPE_BW_END(update_zeta, 3 * ALLOC_SIZE);
 
     TIMER_SCOPE_START(compute_Dzz_rhs);
     // Compute zeta_n+1 - u_n
     for (int i = 0; i < NUM_POINTS; ++i) {
         rhs[i] = zeta[i] - u[i];
     }
-    TIMER_SCOPE_END(compute_Dzz_rhs);
+    TIMER_SCOPE_BW_END(compute_Dzz_rhs, 4 * ALLOC_SIZE);
     // Solve for delta_zeta
     solve_Dzz_tridiag(rhs, delta);
     // Compute eta^n+1 = eta^n + delta_eta
@@ -244,7 +241,7 @@ void solve_timestep(double *eta, double *zeta, double *u, int t)
     for (int i = 0; i < NUM_POINTS; ++i) {
         u[i] += delta[i];
     }
-    TIMER_SCOPE_END(update_u);
+    TIMER_SCOPE_BW_END(update_u, 3 * ALLOC_SIZE);
 
     TIMER_LOG_NL_IF((t + 1) % TIMER_LOG_FREQ == 0 && t < NUM_TIMESTEPS - 1);
 
