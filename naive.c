@@ -6,16 +6,23 @@
 #include "timer.h"
 #include "write_vtk.h"
 
-#define NUM_POINTS_PER_DIR 64
-#define NUM_TIMESTEPS 100
+#ifndef NUM_POINTS_PER_DIR
+#define NUM_POINTS_PER_DIR 260
+#endif
+
+#ifndef NUM_TIMESTEPS
+#define NUM_TIMESTEPS 20
+#endif
 
 #define DX (1.0 / NUM_POINTS_PER_DIR)
 #define DT (1.0 / NUM_TIMESTEPS)
 
+#ifndef NU
 #define NU 0.1
+#endif
 
 #define NUM_POINTS \
-    NUM_POINTS_PER_DIR * NUM_POINTS_PER_DIR * NUM_POINTS_PER_DIR
+    (NUM_POINTS_PER_DIR * NUM_POINTS_PER_DIR * NUM_POINTS_PER_DIR)
 
 #define ALLOC_SIZE NUM_POINTS * sizeof(double)
 
@@ -34,25 +41,26 @@ static double forcing(double x, double y, double z, double t)
     double rz = (z - 0.5) * (z - 0.5);
 
     if (rx + ry + rz < 0.01) {
-        return 0.1;
+        return 0.5;
     } else {
         return 0;
     }
 }
 
 // Solves (I - Dxx) delta = rhs
-void solve_Dxx_tridiag(double *rhs, double *delta)
+static void solve_Dxx_tridiag(double *rhs, double *delta)
 {
     TIMER_SCOPE_START(solve_Dxx_tridiag);
 
-    double *upp = malloc((NUM_POINTS_PER_DIR - 1) * sizeof(double));
+    double *upp_redu = malloc(NUM_POINTS_PER_DIR * sizeof(double));
+    double *rhs_redu = malloc(NUM_POINTS_PER_DIR * sizeof(double));
 
     for (int z = 0; z < NUM_POINTS_PER_DIR; ++z) {
         for (int y = 0; y < NUM_POINTS_PER_DIR; ++y) {
 
-            upp[0] = 0;
+            upp_redu[0] = 0;
             // homogeneous dirichlet
-            rhs[ROW_MAJ(0, y, z)] = 0;
+            rhs_redu[0] = 0;
 
             // Forward reduction
             for (int x = 1; x < NUM_POINTS_PER_DIR - 1; ++x) {
@@ -62,15 +70,14 @@ void solve_Dxx_tridiag(double *rhs, double *delta)
                 const double mid_i = 1.0 + 2 * w;
                 const double low_i = -w;
 
-                const double norm_coef = mid_i - low_i * upp[x - 1];
+                const double norm_coef = mid_i - low_i * upp_redu[x - 1];
 
                 // upp_i = upp_i / (mid_i - low_i upp_i-1)
-                upp[x] = upp_i / norm_coef;
+                upp_redu[x] = upp_i / norm_coef;
 
                 // rhs_i = (rhs_i - low_i rhs_i-1) / (mid_i - low_i upp_i-1)
-                rhs[ROW_MAJ(x, y, z)] =
-                    (rhs[ROW_MAJ(x, y, z)] -
-                     low_i * rhs[ROW_MAJ(x - 1, y, z)]) / norm_coef;
+                rhs_redu[x] = (rhs[ROW_MAJ(x, y, z)] -
+                               low_i * rhs_redu[x - 1]) / norm_coef;
             }
 
             // homogeneous dirichlet
@@ -80,31 +87,33 @@ void solve_Dxx_tridiag(double *rhs, double *delta)
             for (int x = 1; x < NUM_POINTS_PER_DIR; ++x) {
                 // delta_i = rhs_i - upp_i delta_i+1
                 delta[ROW_MAJ(NUM_POINTS_PER_DIR - x - 1, y, z)] =
-                    rhs[ROW_MAJ(NUM_POINTS_PER_DIR - x - 1, y, z)] -
-                    upp[NUM_POINTS_PER_DIR - x - 1] *
+                    rhs_redu[NUM_POINTS_PER_DIR - x - 1] -
+                    upp_redu[NUM_POINTS_PER_DIR - x - 1] *
                     delta[ROW_MAJ(NUM_POINTS_PER_DIR - x, y, z)];
             }
         }
     }
 
-    free(upp);
+    free(upp_redu);
+    free(rhs_redu);
 
-    TIMER_SCOPE_BW_END(solve_Dxx_tridiag, 4 * ALLOC_SIZE);
+    TIMER_SCOPE_BW_END(solve_Dxx_tridiag, 3 * ALLOC_SIZE);
 }
 
 // Solves (I - Dyy) delta = rhs
-void solve_Dyy_tridiag(double *rhs, double *delta)
+static void solve_Dyy_tridiag(double *rhs, double *delta)
 {
     TIMER_SCOPE_START(solve_Dyy_tridiag);
 
-    double *upp = malloc(NUM_POINTS_PER_DIR * sizeof(double));
+    double *upp_redu = malloc(NUM_POINTS_PER_DIR * sizeof(double));
+    double *rhs_redu = malloc(NUM_POINTS_PER_DIR * sizeof(double));
 
     for (int z = 0; z < NUM_POINTS_PER_DIR; ++z) {
         for (int x = 0; x < NUM_POINTS_PER_DIR; ++x) {
 
-            upp[0] = 0;
+            upp_redu[0] = 0;
             // homogeneous dirichlet
-            rhs[ROW_MAJ(x, 0, z)] = 0;
+            rhs_redu[0] = 0;
 
             // Forward reduction
             for (int y = 1; y < NUM_POINTS_PER_DIR - 1; ++y) {
@@ -114,15 +123,14 @@ void solve_Dyy_tridiag(double *rhs, double *delta)
                 const double mid_i = 1.0 + 2 * w;
                 const double low_i = -w;
 
-                const double norm_coef = mid_i - low_i * upp[y - 1];
+                const double norm_coef = mid_i - low_i * upp_redu[y - 1];
 
                 // upp_i = upp_i / (mid_i - low_i upp_i-1)
-                upp[y] = upp_i / norm_coef;
+                upp_redu[y] = upp_i / norm_coef;
 
                 // rhs_i = (rhs_i - low_i rhs_i-1) / (mid_i - low_i upp_i-1)
-                rhs[ROW_MAJ(x, y, z)] =
-                    (rhs[ROW_MAJ(x, y, z)] -
-                     low_i * rhs[ROW_MAJ(x, y - 1, z)]) / norm_coef;
+                rhs_redu[y] = (rhs[ROW_MAJ(x, y, z)] -
+                               low_i * rhs_redu[y - 1]) / norm_coef;
             }
 
             // homogeneous dirichlet
@@ -132,31 +140,33 @@ void solve_Dyy_tridiag(double *rhs, double *delta)
             for (int y = 1; y < NUM_POINTS_PER_DIR; ++y) {
                 // delta_i = rhs_i - upp_i delta_i+1
                 delta[ROW_MAJ(x, NUM_POINTS_PER_DIR - y - 1, z)] =
-                    rhs[ROW_MAJ(x, NUM_POINTS_PER_DIR - y - 1, z)] -
-                    upp[NUM_POINTS_PER_DIR - y - 1] *
+                    rhs_redu[NUM_POINTS_PER_DIR - y - 1] -
+                    upp_redu[NUM_POINTS_PER_DIR - y - 1] *
                     delta[ROW_MAJ(x, NUM_POINTS_PER_DIR - y, z)];
             }
         }
     }
 
-    free(upp);
+    free(upp_redu);
+    free(rhs_redu);
 
-    TIMER_SCOPE_BW_END(solve_Dyy_tridiag, 4 * ALLOC_SIZE);
+    TIMER_SCOPE_BW_END(solve_Dyy_tridiag, 3 * ALLOC_SIZE);
 }
 
 // Solves (I - Dzz) delta = rhs
-void solve_Dzz_tridiag(double *rhs, double *delta)
+static void solve_Dzz_tridiag(double *rhs, double *delta)
 {
     TIMER_SCOPE_START(solve_Dzz_tridiag);
 
-    double *upp = malloc(NUM_POINTS_PER_DIR * sizeof(double));
+    double *upp_redu = malloc(NUM_POINTS_PER_DIR * sizeof(double));
+    double *rhs_redu = malloc(NUM_POINTS_PER_DIR * sizeof(double));
 
     for (int y = 0; y < NUM_POINTS_PER_DIR; ++y) {
         for (int x = 0; x < NUM_POINTS_PER_DIR; ++x) {
 
-            upp[0] = 0;
+            upp_redu[0] = 0;
             // homogeneous dirichlet
-            rhs[ROW_MAJ(x, y, 0)] = 0;
+            rhs_redu[0] = 0;
 
             // Forward reduction
             for (int z = 1; z < NUM_POINTS_PER_DIR - 1; ++z) {
@@ -166,15 +176,15 @@ void solve_Dzz_tridiag(double *rhs, double *delta)
                 const double mid_i = 1.0 + 2 * w;
                 const double low_i = -w;
 
-                const double norm_coef = mid_i - low_i * upp[z - 1];
+                const double norm_coef = mid_i - low_i * upp_redu[z - 1];
 
                 // upp_i = upp_i / (mid_i - low_i upp_i-1)
-                upp[z] = upp_i / norm_coef;
+                upp_redu[z] = upp_i / norm_coef;
 
                 // rhs_i = (rhs_i - low_i rhs_i-1) / (mid_i - low_i upp_i-1)
-                rhs[ROW_MAJ(x, y, z)] =
+                rhs_redu[z] =
                     (rhs[ROW_MAJ(x, y, z)] -
-                     low_i * rhs[ROW_MAJ(x, y, z - 1)]) / norm_coef;
+                     low_i * rhs_redu[z - 1]) / norm_coef;
             }
 
             // homogeneous dirichlet
@@ -184,21 +194,24 @@ void solve_Dzz_tridiag(double *rhs, double *delta)
             for (int z = 1; z < NUM_POINTS_PER_DIR; ++z) {
                 // delta_i = rhs_i - upp_i delta_i+1
                 delta[ROW_MAJ(x, y, NUM_POINTS_PER_DIR - z - 1)] =
-                    rhs[ROW_MAJ(x, y, NUM_POINTS_PER_DIR - z - 1)] -
-                    upp[NUM_POINTS_PER_DIR - z - 1] *
+                    rhs_redu[NUM_POINTS_PER_DIR - z - 1] -
+                    upp_redu[NUM_POINTS_PER_DIR - z - 1] *
                     delta[ROW_MAJ(x, y, NUM_POINTS_PER_DIR - z)];
             }
         }
     }
 
-    free(upp);
+    free(upp_redu);
+    free(rhs_redu);
 
-    TIMER_SCOPE_BW_END(solve_Dzz_tridiag, 4 * ALLOC_SIZE);
+    TIMER_SCOPE_BW_END(solve_Dzz_tridiag, 3 * ALLOC_SIZE);
 }
 
-void compute_eps_naive(const double *eta, const double *zeta,
-                       const double *u, double *eps, int t)
+static void compute_eps_naive(const double *eta, const double *zeta,
+                              const double *u, double *eps, int t)
 {
+    TIMER_SCOPE_START(compute_eps_naive);
+
     for (int z = 0; z < NUM_POINTS_PER_DIR; ++z) {
         for (int y = 0; y < NUM_POINTS_PER_DIR; ++y) {
             for (int x = 0; x < NUM_POINTS_PER_DIR; ++x) {
@@ -221,25 +234,25 @@ void compute_eps_naive(const double *eta, const double *zeta,
                     2.0 * u[ROW_MAJ(x, y, z)] + u[ROW_MAJ(x, y, z + 1)];
 
                 eps[ROW_MAJ(x, y, z)] = eta[ROW_MAJ(x, y, z)] + DT * (
-                    forcing(x * DX, y * DX, z * DX, (t + 0.5) * DT) +
+                    forcing(x * DX, y * DX, z * DX, (t - 0.5) * DT) +
                     NU * (dxx + dyy + dzz) / (DX * DX));
             }
         }
     }
+
+    TIMER_SCOPE_END(compute_eps_naive);
 }
 
-void solve_timestep(double *eta, double *zeta, double *u, int t)
+static void solve_timestep(double *eta, double *zeta, double *u, int t)
 {
     double *eps = malloc(ALLOC_SIZE);
     double *rhs = malloc(ALLOC_SIZE);
     double *delta = malloc(ALLOC_SIZE);
 
     // -O3 optimizes away memset(delta, 0, ALLOC_SIZE)
-    memset(delta, 1, ALLOC_SIZE);
+    //memset(delta, 1, ALLOC_SIZE);
 
-    TIMER_SCOPE_START(compute_eps_naive);
     compute_eps_naive(eta, zeta, u, eps, t);
-    TIMER_SCOPE_END(compute_eps_naive);
 
     // Compute eps_n+1 - eta_n
     TIMER_SCOPE_START(compute_Dxx_rhs);
@@ -313,7 +326,7 @@ int main(int argc, char *argv[])
         solve_timestep(eta, zeta, u, t);
         TIMER_SCOPE_END(solve_timestep);
 
-        if (t % OUTPUT_VTK_FREQ == 0) {
+        if (OUTPUT_VTK_FREQ > 0 && t % OUTPUT_VTK_FREQ == 0) {
             char filename[32];
             sprintf(filename, "u-%04d.vti", t);
             write_vtk(filename, "u", u, NUM_POINTS_PER_DIR,

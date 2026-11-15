@@ -36,11 +36,11 @@ if (cond) { \
     if (bytes > 0) { \
         double bandwidth = (bytes) / \
             (_timer_##name##_elapsed_ms / _timer_##name##_count) / 1e6; \
-        printf("%-20s %12.4f ms %8.2f MB %7.2f GB/s   [avg %ld runs]\n", \
+        printf("%-24s %12.4f ms %8.2f MB %7.2f GB/s   [avg %ld runs]\n", \
                #name, _timer_##name##_elapsed_ms / _timer_##name##_count, \
                bytes / 1e6, bandwidth, _timer_##name##_count); \
     } else { \
-        printf("%-20s %12.4f ms %24s   [avg %ld runs]\n", #name, \
+        printf("%-24s %12.4f ms %24s   [avg %ld runs]\n", #name, \
            _timer_##name##_elapsed_ms / _timer_##name##_count, "", \
            _timer_##name##_count); \
     } \
