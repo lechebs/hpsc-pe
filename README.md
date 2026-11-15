@@ -1,4 +1,4 @@
-# ADI tridiagonal solver examples
+# Performance Optimization Lecture
 
 ## Requirements
 
@@ -22,13 +22,15 @@ make transpose_dxx2
 make clean
 ```
 
+Binaries are written to `build/`.
+
 ## Command-line options
 
 ```text
 NUM_POINTS_PER_DIR=260  grid points per direction
 NUM_TIMESTEPS=20        number of timesteps
 OUTPUT_VTK_FREQ=0       write u-XXXX.vti every N steps (0 = off)
-TIMER_LOG_FREQ=0        timer report interval (0 = off)
+TIMER_LOG_FREQ=1        timer report interval (0 = off)
 DEFINES="..."           extra compiler definitions, e.g. -DNU=0.01
 CC=gcc                  compiler
 OPT=-O3                 optimization flags
@@ -49,7 +51,25 @@ make naive DEFINES="-DNU=0.01"
 Run a solver, for example:
 
 ```sh
-./naive
+./build/naive
+```
+
+VTK files are written to the current directory.
+
+## STREAM benchmark
+
+The benchmark has its own Makefile:
+
+```sh
+cd stream_bench
+make
+./stream_bench
+```
+
+Use `DEFINES` for benchmark knobs, for example:
+
+```sh
+make DEFINES="-DSTREAM_ARRAY_SIZE=8388608 -DNTIMES=5"
 ```
 
 ## Notes
@@ -60,6 +80,5 @@ Run a solver, for example:
   `NUM_POINTS_PER_DIR` to be a multiple of 4.
 - `transpose_dxx2` processes two `y`-tiles concurrently in the `Dxx`
   sweep.
-- VTK files are written to the current directory.
 - `make` does not rebuild when only a make variable changes. Use
   `make -B`, or `make clean`, after changing such a variable.

@@ -32,14 +32,10 @@
 #endif
 
 #ifndef DZZ_BLOCK
-#define DZZ_BLOCK 8
+#define DZZ_BLOCK 1
 #endif
 
 #define DXX_VLEN 4
-
-#if (NUM_POINTS_PER_DIR % DXX_VLEN) != 0
-#error "NUM_POINTS_PER_DIR must be a multiple of DXX_VLEN"
-#endif
 
 #define DYY_SCRATCH_SIZE \
     (NUM_POINTS_PER_DIR * NUM_POINTS_PER_DIR + NUM_POINTS_PER_DIR)
@@ -77,21 +73,6 @@ static double forcing(double x, double y, double z, double t)
     }
 }
 
-__attribute__((target("avx2")))
-static inline void transpose4x4(__m256d *r0, __m256d *r1,
-                                __m256d *r2, __m256d *r3)
-{
-    __m256d t0 = _mm256_unpacklo_pd(*r0, *r1);
-    __m256d t1 = _mm256_unpackhi_pd(*r0, *r1);
-    __m256d t2 = _mm256_unpacklo_pd(*r2, *r3);
-    __m256d t3 = _mm256_unpackhi_pd(*r2, *r3);
-
-    *r0 = _mm256_permute2f128_pd(t0, t2, 0x20);
-    *r1 = _mm256_permute2f128_pd(t1, t3, 0x20);
-    *r2 = _mm256_permute2f128_pd(t0, t2, 0x31);
-    *r3 = _mm256_permute2f128_pd(t1, t3, 0x31);
-}
-
 // Solves (I - Dxx)(eta_n+1 - eta_n) = eps_n+1 - eta_n
 __attribute__((target("avx2")))
 static void solve_Dxx_tridiag_fused(const double *restrict eps,
@@ -112,64 +93,39 @@ static void solve_Dxx_tridiag_fused(const double *restrict eps,
         upp_redu[x] = upp_i / norm_coef;
     }
 
+    const __m128i gather_idx = _mm_setr_epi32(
+        0,
+        NUM_POINTS_PER_DIR,
+        2 * NUM_POINTS_PER_DIR,
+        3 * NUM_POINTS_PER_DIR);
+
     const __m256d low_vec = _mm256_set1_pd(low_i);
     const __m256d zero = _mm256_setzero_pd();
 
+    const int nvec = (NUM_POINTS_PER_DIR / DXX_VLEN) * DXX_VLEN;
+
     for (int z = 0; z < NUM_POINTS_PER_DIR; ++z) {
-        for (int y = 0; y < NUM_POINTS_PER_DIR; y += DXX_VLEN) {
+        for (int y = 0; y < nvec; y += DXX_VLEN) {
+
+            // homogeneous dirichlet
+            _mm256_storeu_pd(rhs_redu, zero);
 
             // Forward reduction
-            __m256d rhs_prev = zero;
-            for (int tk = 0; tk < NUM_POINTS_PER_DIR; tk += DXX_VLEN) {
+            for (int x = 1; x < NUM_POINTS_PER_DIR - 1; ++x) {
 
-                const int base = ROW_MAJ(tk, y, z);
+                const double norm_coef = mid_i - low_i * upp_redu[x - 1];
+                const int i = ROW_MAJ(x, y, z);
 
-                __m256d e0 = _mm256_loadu_pd(
-                    eta + base + 0 * NUM_POINTS_PER_DIR);
-                __m256d e1 = _mm256_loadu_pd(
-                    eta + base + 1 * NUM_POINTS_PER_DIR);
-                __m256d e2 = _mm256_loadu_pd(
-                    eta + base + 2 * NUM_POINTS_PER_DIR);
-                __m256d e3 = _mm256_loadu_pd(
-                    eta + base + 3 * NUM_POINTS_PER_DIR);
+                __m256d eta_vec = _mm256_i32gather_pd(eta + i, gather_idx, 8);
+                __m256d eps_vec = _mm256_i32gather_pd(eps + i, gather_idx, 8);
+                __m256d rhs_prev = _mm256_loadu_pd(
+                    rhs_redu + (x - 1) * DXX_VLEN);
 
-                __m256d p0 = _mm256_loadu_pd(
-                    eps + base + 0 * NUM_POINTS_PER_DIR);
-                __m256d p1 = _mm256_loadu_pd(
-                    eps + base + 1 * NUM_POINTS_PER_DIR);
-                __m256d p2 = _mm256_loadu_pd(
-                    eps + base + 2 * NUM_POINTS_PER_DIR);
-                __m256d p3 = _mm256_loadu_pd(
-                    eps + base + 3 * NUM_POINTS_PER_DIR);
+                __m256d rhs = _mm256_sub_pd(eps_vec, eta_vec);
+                rhs = _mm256_sub_pd(rhs, _mm256_mul_pd(low_vec, rhs_prev));
+                rhs = _mm256_div_pd(rhs, _mm256_set1_pd(norm_coef));
 
-                __m256d d0 = _mm256_sub_pd(p0, e0);
-                __m256d d1 = _mm256_sub_pd(p1, e1);
-                __m256d d2 = _mm256_sub_pd(p2, e2);
-                __m256d d3 = _mm256_sub_pd(p3, e3);
-                transpose4x4(&d0, &d1, &d2, &d3);
-
-                __m256d diff_col[DXX_VLEN] = {d0, d1, d2, d3};
-
-                for (int k = 0; k < DXX_VLEN; ++k) {
-                    const int x = tk + k;
-
-                    if (x == 0 || x == NUM_POINTS_PER_DIR - 1) {
-                        _mm256_storeu_pd(rhs_redu + x * DXX_VLEN, zero);
-                        rhs_prev = zero;
-                    } else {
-                        const double norm_coef =
-                            mid_i - low_i * upp_redu[x - 1];
-
-                        __m256d rhs = diff_col[k];
-                        rhs = _mm256_sub_pd(
-                            rhs, _mm256_mul_pd(low_vec, rhs_prev));
-                        rhs = _mm256_div_pd(
-                            rhs, _mm256_set1_pd(norm_coef));
-
-                        _mm256_storeu_pd(rhs_redu + x * DXX_VLEN, rhs);
-                        rhs_prev = rhs;
-                    }
-                }
+                _mm256_storeu_pd(rhs_redu + x * DXX_VLEN, rhs);
             }
 
             // homogeneous dirichlet
@@ -181,39 +137,44 @@ static void solve_Dxx_tridiag_fused(const double *restrict eps,
 
             // Backward substitution
             __m256d delta_prev = zero;
-            for (int tk = NUM_POINTS_PER_DIR - DXX_VLEN; tk >= 0;
-                 tk -= DXX_VLEN) {
+            for (int x = NUM_POINTS_PER_DIR - 2; x >= 0; --x) {
 
-                __m256d delta_col[DXX_VLEN];
+                __m256d rhs = _mm256_loadu_pd(rhs_redu + x * DXX_VLEN);
+                __m256d upp_vec = _mm256_set1_pd(upp_redu[x]);
+                __m256d delta = _mm256_sub_pd(
+                    rhs, _mm256_mul_pd(upp_vec, delta_prev));
 
-                for (int k = DXX_VLEN - 1; k >= 0; --k) {
-                    const int x = tk + k;
+                double delta_lane[DXX_VLEN];
+                _mm256_storeu_pd(delta_lane, delta);
 
-                    if (x == NUM_POINTS_PER_DIR - 1) {
-                        delta_col[k] = zero;
-                        delta_prev = zero;
-                    } else {
-                        __m256d rhs = _mm256_loadu_pd(
-                            rhs_redu + x * DXX_VLEN);
-                        __m256d upp_vec = _mm256_set1_pd(upp_redu[x]);
-                        __m256d delta = _mm256_sub_pd(
-                            rhs, _mm256_mul_pd(upp_vec, delta_prev));
-
-                        delta_col[k] = delta;
-                        delta_prev = delta;
-                    }
-                }
-
-                transpose4x4(&delta_col[0], &delta_col[1],
-                             &delta_col[2], &delta_col[3]);
-
-                const int base = ROW_MAJ(tk, y, z);
+                const int i = ROW_MAJ(x, y, z);
                 for (int lane = 0; lane < DXX_VLEN; ++lane) {
-                    double *row = eta + base +
-                                  lane * NUM_POINTS_PER_DIR;
-                    __m256d e = _mm256_loadu_pd(row);
-                    _mm256_storeu_pd(row, _mm256_add_pd(e, delta_col[lane]));
+                    eta[i + lane * NUM_POINTS_PER_DIR] += delta_lane[lane];
                 }
+
+                delta_prev = delta;
+            }
+        }
+
+        // scalar tail
+        for (int y = nvec; y < NUM_POINTS_PER_DIR; ++y) {
+
+            rhs_redu[0] = 0;
+
+            for (int x = 1; x < NUM_POINTS_PER_DIR - 1; ++x) {
+                const double norm_coef = mid_i - low_i * upp_redu[x - 1];
+                const int i = ROW_MAJ(x, y, z);
+                rhs_redu[x] = (eps[i] - eta[i] -
+                               low_i * rhs_redu[x - 1]) / norm_coef;
+            }
+
+            eta[ROW_MAJ(NUM_POINTS_PER_DIR - 1, y, z)] = 0;
+
+            double delta_prev = 0;
+            for (int x = NUM_POINTS_PER_DIR - 2; x >= 0; --x) {
+                double delta = rhs_redu[x] - upp_redu[x] * delta_prev;
+                eta[ROW_MAJ(x, y, z)] += delta;
+                delta_prev = delta;
             }
         }
     }

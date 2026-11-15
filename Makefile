@@ -1,5 +1,9 @@
 CC = gcc
 
+SRC_DIR = tridiag
+INC_DIR = tridiag/utils
+BUILD_DIR = build
+
 NUM_POINTS_PER_DIR ?= 260
 NUM_TIMESTEPS ?= 20
 
@@ -11,7 +15,7 @@ OUTPUT_VTK_FREQ ?= 0
 
 DEFINES ?=
 
-TIMER_LOG_FREQ ?= 0
+TIMER_LOG_FREQ ?= 1
 ifneq ($(filter-out 0,$(TIMER_LOG_FREQ)),)
 TIMER_DEFINES = -DTIMER -DTIMER_LOG_FREQ=$(TIMER_LOG_FREQ)
 else
@@ -29,37 +33,23 @@ ALL_CFLAGS = $(OPT) $(CPPFLAGS) $(CFLAGS)
 
 AVX2_FLAGS ?= -mavx2 -mfma
 
-HEADERS = timer.h write_vtk.h
+HEADERS = $(INC_DIR)/timer.h $(INC_DIR)/write_vtk.h
 TARGETS = naive prealloc fused stream blocked gather_dxx transpose_dxx transpose_dxx2
 
 all: $(TARGETS)
 
-naive: naive.c $(HEADERS)
-	$(CC) $(ALL_CFLAGS) $(COMMON_DEFINES) -o $@ $< $(LDFLAGS) $(LDLIBS)
+$(TARGETS): %: $(BUILD_DIR)/%
 
-prealloc: prealloc.c $(HEADERS)
-	$(CC) $(ALL_CFLAGS) $(COMMON_DEFINES) -o $@ $< $(LDFLAGS) $(LDLIBS)
+$(BUILD_DIR)/%: $(SRC_DIR)/%.c $(HEADERS) | $(BUILD_DIR)
+	$(CC) $(ALL_CFLAGS) $(TARGET_CFLAGS) $(COMMON_DEFINES) -I$(INC_DIR) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
-fused: fused.c $(HEADERS)
-	$(CC) $(ALL_CFLAGS) $(COMMON_DEFINES) -o $@ $< $(LDFLAGS) $(LDLIBS)
+$(BUILD_DIR)/gather_dxx $(BUILD_DIR)/transpose_dxx $(BUILD_DIR)/transpose_dxx2: TARGET_CFLAGS = $(AVX2_FLAGS)
 
-stream: stream.c $(HEADERS)
-	$(CC) $(ALL_CFLAGS) $(COMMON_DEFINES) -o $@ $< $(LDFLAGS) $(LDLIBS)
-
-blocked: blocked.c $(HEADERS)
-	$(CC) $(ALL_CFLAGS) $(COMMON_DEFINES) -o $@ $< $(LDFLAGS) $(LDLIBS)
-
-gather_dxx: gather_dxx.c $(HEADERS)
-	$(CC) $(ALL_CFLAGS) $(AVX2_FLAGS) $(COMMON_DEFINES) -o $@ $< $(LDFLAGS) $(LDLIBS)
-
-transpose_dxx: transpose_dxx.c $(HEADERS)
-	$(CC) $(ALL_CFLAGS) $(AVX2_FLAGS) $(COMMON_DEFINES) -o $@ $< $(LDFLAGS) $(LDLIBS)
-
-transpose_dxx2: transpose_dxx2.c $(HEADERS)
-	$(CC) $(ALL_CFLAGS) $(AVX2_FLAGS) $(COMMON_DEFINES) -o $@ $< $(LDFLAGS) $(LDLIBS)
+$(BUILD_DIR):
+	mkdir -p $@
 
 clean:
-	rm -f $(TARGETS)
+	rm -rf $(BUILD_DIR)
 
 .DELETE_ON_ERROR:
-.PHONY: all clean
+.PHONY: all clean $(TARGETS)
