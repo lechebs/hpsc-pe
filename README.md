@@ -1,8 +1,9 @@
-# Performance Optimization Lecture
+# Batched tridiagonal solver optimization
 
 ## Requirements
 
 - GCC
+- make
 - AVX2-capable CPU for `gather_dxx`, `transpose_dxx`, and
   `transpose_dxx2`
 
