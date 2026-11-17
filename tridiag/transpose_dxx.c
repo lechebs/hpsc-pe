@@ -422,8 +422,6 @@ static void solve_timestep(double *restrict eta, double *restrict zeta,
     solve_Dyy_tridiag_fused(eta, zeta, upp_redu, rhs_redu);
     // Solve for u_n+1
     solve_Dzz_tridiag_fused(zeta, u, upp_redu, rhs_redu);
-
-    TIMER_LOG_NL_IF((t + 1) % TIMER_LOG_FREQ == 0);
 }
 
 int main(int argc, char *argv[])
@@ -447,6 +445,7 @@ int main(int argc, char *argv[])
         TIMER_SCOPE_START(solve_timestep);
         solve_timestep(eta, zeta, u, scratch, t);
         TIMER_SCOPE_END(solve_timestep);
+        TIMER_LOG_NL_IF(t % TIMER_LOG_FREQ == 0);
 
         if (OUTPUT_VTK_FREQ > 0 && t % OUTPUT_VTK_FREQ == 0) {
             char filename[32];

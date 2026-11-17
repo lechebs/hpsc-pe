@@ -1,5 +1,7 @@
 # Batched tridiagonal solver optimization
 
+Get the lecture slides [here](https://docs.google.com/presentation/d/1JZLcH5d0Y2nsTxAYQuHWfNVLXOKAmgFDc9F-gzq6jAM/edit?usp=sharing]).
+
 ## Requirements
 
 - GCC

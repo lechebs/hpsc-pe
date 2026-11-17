@@ -304,8 +304,6 @@ static void solve_timestep(double *eta, double *zeta,
         u[i] += delta[i];
     }
     TIMER_SCOPE_BW_END(update_u, 3 * ALLOC_SIZE);
-
-    TIMER_LOG_NL_IF((t + 1) % TIMER_LOG_FREQ == 0);
 }
 
 int main(int argc, char *argv[])
@@ -329,6 +327,7 @@ int main(int argc, char *argv[])
         TIMER_SCOPE_START(solve_timestep);
         solve_timestep(eta, zeta, u, scratch, t);
         TIMER_SCOPE_END(solve_timestep);
+        TIMER_LOG_NL_IF(t % TIMER_LOG_FREQ == 0);
 
         if (OUTPUT_VTK_FREQ > 0 && t % OUTPUT_VTK_FREQ == 0) {
             char filename[32];
